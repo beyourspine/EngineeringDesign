@@ -1,5 +1,6 @@
 #include <Wire.h>
 #include <ArduinoBLE.h>
+#include <ESP32Time.h>
 
 typedef struct sensorData {
   float roll;
@@ -9,8 +10,10 @@ typedef struct sensorData {
 
 typedef struct sensorTime {
   sensorData* sensor[4];
-  int time;
+  long int time;
 };
+
+ESP32Time rtc(0);
 
 const int MPU = 0x68;
 int ledPin = D9, sensorCount = 4;
@@ -24,6 +27,7 @@ void setup()
   Serial.begin(19200);
   Wire.begin();
   BLE.begin();
+  ESP32Time rtc(0);
   resetSensors();
 
   pinMode(ledPin, OUTPUT);
@@ -52,6 +56,7 @@ sensorTime getAllData()
 {
 
   sensorTime allData;
+  allData.time = rtc.getEpoch();
 
   for (int i = 0; i < sensorCount; i++)
   {
