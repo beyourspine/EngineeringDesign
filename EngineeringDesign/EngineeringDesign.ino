@@ -13,22 +13,40 @@ typedef struct sensorTime {
   long int time;
 };
 
+BLEService sensorService("1101");
+BLEUnsignedCharCharacteristic sensorsData("2101", BLERead | BLENotify);
+
+
 ESP32Time rtc(0);
 
 const int MPU = 0x68;
 int ledPin = D9, sensorCount = 4;
 int sensors[4] = {D2, D3, D5, D6};
 sensorTime sensorArray[10] = {NULL};
-float accErrorX, accErrorY, gyroErrorX, gyroErrorY, gyroErrorZ;
+float accErrorX, accErrorY, gyroErrorX, gyroErrorY, gyroErrorZ, oldTime;
 float accX, accY, accZ, gyroX, gyroY, gyroZ, elapsedTime, currentTime, previousTime, accAngleX, accAngleY, gyroAngleX, gyroAngleY, gyroAngleZ, yaw;
 
 void setup() 
 {
   Serial.begin(19200);
   Wire.begin();
-  BLE.begin();
   ESP32Time rtc(0);
   resetSensors();
+
+  if (!BLE.begin()) {
+    digitalWrite(ledPin, HIGH);
+    delay(500);
+    digitalWrite(ledPin, LOW);
+    while (1);
+  }
+  BLE.setLocalName("PostureMonitor");
+  BLE.setAdvertisedService(sensorService);
+  sensorService.addCharacteristic(sensorsData);
+  BLE.addService(sensorService);
+
+
+
+  BLE.advertise();
 
   pinMode(ledPin, OUTPUT);
   pinMode(sensors[0], OUTPUT);
@@ -47,7 +65,19 @@ void setup()
 
 void loop() 
 {
+  BLEDevice central = BLE.central();
+
   sensorArray[0] = getAllData();
+
+  if (central)
+  {
+    digitalWrite(ledPin, HIGH);
+  }
+  else
+  {
+    digitalWrite(ledPin, LOW);
+  }
+  updateSensorData(oldTime);
 
   freeMem(sensorArray);
 }
@@ -115,6 +145,17 @@ sensorData *getData(int sensorNr)
   sensorData* data;
 
   return data;
+}
+
+float updateSensorData(float oldTime)
+{
+  float time = millis();
+  if ((time - oldTime) / 1000 > 10)
+  {
+    sensorsData.writeValue(0);
+    oldTime = currentTime;
+  }
+  return oldTime;
 }
 
 void resetSensors()
