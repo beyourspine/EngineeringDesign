@@ -45,13 +45,14 @@ void loop()
 {
   sensorArray[0] = getAllData();
 
-
+  freeMem(sensorArray);
 }
 
 sensorTime getAllData() 
 {
 
   sensorTime allData;
+
   for (int i = 0; i < sensorCount; i++)
   {
     digitalWrite(sensors[i], LOW);
@@ -123,9 +124,18 @@ void resetSensors()
   }
 }
 
-void freeMem(sensorTime sensorArrayFree)
+void freeMem(sensorTime array[])
 {
-
+  for (int i = 0; i < 10; i++)
+  {
+    if (array[i].sensor[0] != NULL)
+    {
+      for (int j = 0; j < 4; j++)
+      {
+        free(array[i].sensor[j]);
+      }
+    }
+  }
 }
 
 void calculateError()
