@@ -1,6 +1,8 @@
 #include <Wire.h>
 #include <ArduinoBLE.h>
 #include <ESP32Time.h>
+#include <Preferences.h>
+
 
 typedef struct sensorData {
   float roll;
@@ -13,17 +15,29 @@ typedef struct sensorTime {
   long int time;
 };
 
-BLEService sensorService("1101");
-BLEUnsignedCharCharacteristic sensorsData("2101", BLERead | BLENotify);
+typedef struct sensorError {
+  float accErrorX;
+  float accErrorY;
+  float gyroErrorX;
+  float gyroErrorY;
+  float gyroErrorZ;
+};
+
+BLEService sensorService("c47cace0-6c57-11ee-b962-0242ac120002");
+BLEIntCharacteristic sensorBLEData("c47caf88-6c57-11ee-b962-0242ac120002", BLERead | BLENotify);
 
 
 ESP32Time rtc(0);
 
+
+
 const int MPU = 0x68;
 int ledPin = D9, sensorCount = 4;
 int sensors[4] = {D2, D3, D5, D6};
-sensorTime sensorArray[10] = {NULL};
-float accErrorX, accErrorY, gyroErrorX, gyroErrorY, gyroErrorZ, oldTime;
+int errorAddress[4] = {0, 20, 41, 62};
+sensorTime sensorArray[10] = {};
+sensorError sensorErrorArray[4] = {};
+float oldTime;
 float accX, accY, accZ, gyroX, gyroY, gyroZ, elapsedTime, currentTime, previousTime, accAngleX, accAngleY, gyroAngleX, gyroAngleY, gyroAngleZ, yaw;
 
 void setup() 
@@ -32,6 +46,17 @@ void setup()
   Wire.begin();
   ESP32Time rtc(0);
   resetSensors();
+  
+  if (false)
+  {
+    Serial.println("Warning: Sensors are uncalibrated, calibration will run in 5 seconds");
+    
+    calculateError();
+  }
+  else
+  {
+    retrieveErrorData();
+  }
 
   if (!BLE.begin()) {
     digitalWrite(ledPin, HIGH);
@@ -40,11 +65,11 @@ void setup()
     while (1);
   }
   BLE.setLocalName("PostureMonitor");
+  BLE.setDeviceName("ESP32-E");
   BLE.setAdvertisedService(sensorService);
-  sensorService.addCharacteristic(sensorsData);
+  sensorService.addCharacteristic(sensorBLEData);
   BLE.addService(sensorService);
-
-
+  sensorBLEData.writeValue(1);
 
   BLE.advertise();
 
@@ -65,10 +90,22 @@ void setup()
 
 void loop() 
 {
+  
   BLEDevice central = BLE.central();
 
-  sensorArray[0] = getAllData();
+  sensorBLEData.writeValue(1);
+ 
+  Serial.println(sensorArray[0].time);
+  Serial.print("|");
+  Serial.print(sensorArray[0].sensor[0]->pitch);
+  Serial.print("|");
+  Serial.print(sensorArray[0].sensor[0]->roll);
+  Serial.print("|");
+  Serial.print(sensorArray[0].sensor[0]->yaw);
+  Serial.println("");
+  
 
+  delay(1000);
   if (central)
   {
     digitalWrite(ledPin, HIGH);
@@ -77,15 +114,18 @@ void loop()
   {
     digitalWrite(ledPin, LOW);
   }
-  updateSensorData(oldTime);
 
+  
+  //updateSensorData(oldTime);
+   sensorBLEData.writeValue(0);
   freeMem(sensorArray);
 }
 
 sensorTime getAllData() 
 {
-
+  
   sensorTime allData;
+  
   allData.time = rtc.getEpoch();
 
   for (int i = 0; i < sensorCount; i++)
@@ -102,8 +142,8 @@ sensorTime getAllData()
     accY = (Wire.read() << 8|Wire.read()) / 16384.0;
     accZ = (Wire.read() << 8|Wire.read()) / 16384.0;
 
-    accAngleX = (atan(accY / sqrt(pow(accX, 2) + pow(accZ, 2))) * 180 / PI) + accErrorX; 
-    accAngleY = (atan(-1 * accX / sqrt(pow(accY, 2) + pow(accZ, 2))) * 180 / PI) + accErrorY;
+    accAngleX = (atan(accY / sqrt(pow(accX, 2) + pow(accZ, 2))) * 180 / PI) + sensorErrorArray[i].accErrorX; 
+    accAngleY = (atan(-1 * accX / sqrt(pow(accY, 2) + pow(accZ, 2))) * 180 / PI) + sensorErrorArray[i].accErrorY;
 
     previousTime = currentTime; 
     currentTime = millis();
@@ -118,9 +158,9 @@ sensorTime getAllData()
     gyroY = (Wire.read() << 8|Wire.read()) / 131.0;
     gyroZ = (Wire.read() << 8|Wire.read()) / 131.0;
 
-    gyroX = gyroX + gyroErrorX;
-    gyroY = gyroY + gyroErrorY;
-    gyroZ = gyroZ + gyroErrorZ;
+    gyroX = gyroX + sensorErrorArray[i].gyroErrorX;
+    gyroY = gyroY + sensorErrorArray[i].gyroErrorY;
+    gyroZ = gyroZ + sensorErrorArray[i].gyroErrorZ;
 
     gyroAngleX = gyroAngleX + gyroX * elapsedTime;
     gyroAngleY = gyroAngleY + gyroY * elapsedTime;
@@ -140,7 +180,7 @@ sensorTime getAllData()
   return allData;
 }
 
-sensorData *getData(int sensorNr)
+sensorData* getData(int sensorNr)
 {
   sensorData* data;
 
@@ -152,7 +192,7 @@ float updateSensorData(float oldTime)
   float time = millis();
   if ((time - oldTime) / 1000 > 10)
   {
-    sensorsData.writeValue(0);
+    sensorBLEData.writeValue(0);
     oldTime = currentTime;
   }
   return oldTime;
@@ -184,48 +224,65 @@ void freeMem(sensorTime array[])
   }
 }
 
+void retrieveErrorData()
+{
+  for (int i = 0; i < 4; i++)
+  {
+    //sensorErrorArray[i] = Preferences.;
+  }
+}
+
+
 void calculateError()
 {
-  int cycles = 0;
-
-  while (cycles < 200)
+  for (int i = 0; i < sensorCount; i++)
   {
-    Wire.beginTransmission(MPU);
-    Wire.write(0x3B);
-    Wire.endTransmission(false);
-    Wire.requestFrom(MPU, 6);
+    int cycles = 0;
 
-    accX = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
-    accY = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
-    accZ = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
+    while (cycles < 200)
+    {
+      Wire.beginTransmission(MPU);
+      Wire.write(0x3B);
+      Wire.endTransmission(false);
+      Wire.requestFrom(MPU, 6);
 
-    accErrorX = accErrorX + ((atan((accY) / sqrt(pow((accX), 2) + pow((accZ), 2))) * 180 / PI));
-    accErrorY = accErrorY + ((atan(-1 * (accX) / sqrt(pow((accY), 2) + pow((accZ), 2))) * 180 / PI));
-    cycles++;
+      accX = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
+      accY = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
+      accZ = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
+
+      sensorErrorArray[i].accErrorX = sensorErrorArray[i].accErrorX + ((atan((accY) / sqrt(pow((accX), 2) + pow((accZ), 2))) * 180 / PI));
+      sensorErrorArray[i].accErrorY = sensorErrorArray[i].accErrorY + ((atan(-1 * (accX) / sqrt(pow((accY), 2) + pow((accZ), 2))) * 180 / PI));
+      cycles++;
+    }
+
+    sensorErrorArray[i].accErrorX = sensorErrorArray[i].accErrorX / 200;
+    sensorErrorArray[i].accErrorY = sensorErrorArray[i].accErrorY / 200;
+    cycles = 0;
+
+    while (cycles < 200)
+    {
+      Wire.beginTransmission(MPU);
+      Wire.write(0x43);
+      Wire.endTransmission(false);
+      Wire.requestFrom(MPU, 6);
+
+      gyroX = Wire.read() << 8 | Wire.read();
+      gyroY = Wire.read() << 8 | Wire.read();
+      gyroZ = Wire.read() << 8 | Wire.read();
+    
+      sensorErrorArray[i].gyroErrorX = sensorErrorArray[i].gyroErrorX + (gyroX / 131.0);
+      sensorErrorArray[i].gyroErrorY = sensorErrorArray[i].gyroErrorY + (gyroY / 131.0);
+      sensorErrorArray[i].gyroErrorZ = sensorErrorArray[i].gyroErrorZ + (gyroZ / 131.0);
+      cycles++;
+    }
+
+    sensorErrorArray[i].gyroErrorX = sensorErrorArray[i].gyroErrorX / 200;
+    sensorErrorArray[i].gyroErrorX = sensorErrorArray[i].gyroErrorX / 200;
+    sensorErrorArray[i].gyroErrorX = sensorErrorArray[i].gyroErrorX / 200;
+
+    
   }
 
-  accErrorX = accErrorX / 200;
-  accErrorY = accErrorY / 200;
-  cycles = 0;
+  //Preferences.putBytes()
 
-  while (cycles < 200)
-  {
-    Wire.beginTransmission(MPU);
-    Wire.write(0x43);
-    Wire.endTransmission(false);
-    Wire.requestFrom(MPU, 6);
-
-    gyroX = Wire.read() << 8 | Wire.read();
-    gyroY = Wire.read() << 8 | Wire.read();
-    gyroZ = Wire.read() << 8 | Wire.read();
-  
-    gyroErrorX = gyroErrorX + (gyroX / 131.0);
-    gyroErrorY = gyroErrorY + (gyroY / 131.0);
-    gyroErrorZ = gyroErrorZ + (gyroZ / 131.0);
-    cycles++;
-  }
-
-  gyroErrorX = gyroErrorX / 200;
-  gyroErrorY = gyroErrorY / 200;
-  gyroErrorZ = gyroErrorZ / 200;
 }
